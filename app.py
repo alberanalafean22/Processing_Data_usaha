@@ -175,7 +175,7 @@ elif menu == "4. Ekstrak Telp & Alamat":
                 st.success("Ekstraksi selesai! Kolom 'nomor_hp' dan 'alamat' telah ditambahkan.")
                 
                 # Tampilkan kolom baru beserta kolom aslinya agar mudah dicek
-                st.dataframe(df[[target_col, 'nomor_hp', 'alamat']].head(25))
+                st.dataframe(df[[target_col, 'nomor_hp', 'alamat']].head(30))
                 
                 excel_data = to_excel(df)
                 st.download_button(
