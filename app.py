@@ -2,6 +2,12 @@ import streamlit as st
 import pandas as pd
 import re
 import io
+import pydeck as pdk
+import geopandas as gpd
+from shapely.geometry import Point
+import tempfile
+import zipfile
+import os
 
 # Konfigurasi Halaman
 st.set_page_config(page_title="Data Processing App", layout="wide")
@@ -22,12 +28,36 @@ def load_data(file):
         return None
     return None
 
-# Fungsi untuk mengonversi DataFrame ke format Excel (Bytes)
+# Fungsi untuk mengonversi DataFrame ke format Excel
 def to_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Sheet1')
     return output.getvalue()
+
+# Fungsi untuk mengonversi DataFrame ke format Shapefile (Zipped)
+def to_shp_zip(df, lat_col, lon_col):
+    # Membuat GeoDataFrame
+    geometry = [Point(xy) for xy in zip(df[lon_col], df[lat_col])]
+    gdf = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
+    
+    # Membuat direktori sementara untuk menyimpan pecahan file SHP
+    temp_dir = tempfile.mkdtemp()
+    base_filename = "peta_lokasi"
+    shp_path = os.path.join(temp_dir, f"{base_filename}.shp")
+    
+    # Menyimpan ke format ESRI Shapefile
+    gdf.to_file(shp_path, driver='ESRI Shapefile')
+    
+    # Membungkus file-file SHP (.shp, .shx, .dbf, .prj) ke dalam satu ZIP
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for ext in ['.shp', '.shx', '.dbf', '.prj', '.cpg']:
+            file_path = os.path.join(temp_dir, f"{base_filename}{ext}")
+            if os.path.exists(file_path):
+                zip_file.write(file_path, f"{base_filename}{ext}")
+                
+    return zip_buffer.getvalue()
 
 # Fungsi Ekstraksi Regex
 def extract_phone_number(text):
@@ -56,172 +86,119 @@ menu = st.sidebar.radio(
      "2. Cek & Hapus Duplikat", 
      "3. Merge Data (Maks 15)", 
      "4. Ekstrak Telp & Alamat",
-     "5. Visualisasi Peta (Long & Lat)") # <-- Menu Baru
+     "5. Visualisasi Peta (Terang & SHP)")
 )
 
 # ==========================================
-# MENU 1: Membaca file dan memilih kolom
+# MENU 1 - 4 (Sama seperti sebelumnya)
 # ==========================================
 if menu == "1. Filter & Download Kolom":
     st.header("1. Tampilkan dan Pilih Kolom Tertentu")
-    uploaded_file = st.file_uploader("Upload file (CSV, XLSX, JSON)", type=['csv', 'xlsx', 'json'], key='menu1')
-    
+    uploaded_file = st.file_uploader("Upload file (CSV, XLSX, JSON)", type=['csv', 'xlsx', 'json'], key='m1')
     if uploaded_file:
         df = load_data(uploaded_file)
         if df is not None:
-            st.write("Preview Data Asli:")
             st.dataframe(df.head())
-            
-            all_columns = df.columns.tolist()
-            selected_columns = st.multiselect("Pilih kolom yang ingin dipertahankan:", all_columns, default=all_columns)
-            
+            selected_columns = st.multiselect("Pilih kolom:", df.columns.tolist(), default=df.columns.tolist())
             if selected_columns:
                 df_filtered = df[selected_columns]
-                st.write("Preview Data Setelah Filter Kolom:")
-                st.dataframe(df_filtered.head())
-                
-                excel_data = to_excel(df_filtered)
-                st.download_button(
-                    label="Download Data (XLSX)",
-                    data=excel_data,
-                    file_name="data_filtered.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                st.download_button("Download Data (XLSX)", data=to_excel(df_filtered), file_name="data_filtered.xlsx")
 
-# ==========================================
-# MENU 2: Cek Duplikat berdasarkan kolom
-# ==========================================
 elif menu == "2. Cek & Hapus Duplikat":
     st.header("2. Hapus Baris Duplikat")
-    uploaded_file = st.file_uploader("Upload file (CSV, XLSX, JSON)", type=['csv', 'xlsx', 'json'], key='menu2')
-    
+    uploaded_file = st.file_uploader("Upload file (CSV, XLSX, JSON)", type=['csv', 'xlsx', 'json'], key='m2')
     if uploaded_file:
         df = load_data(uploaded_file)
         if df is not None:
-            st.write(f"Total baris awal: **{len(df)}**")
-            
-            all_columns = df.columns.tolist()
-            dup_columns = st.multiselect("Pilih kolom untuk acuan cek duplikat (biarkan kosong untuk cek semua kolom):", all_columns)
-            
-            if st.button("Proses Hapus Duplikat"):
-                subset = dup_columns if dup_columns else None
-                df_dedup = df.drop_duplicates(subset=subset)
-                
-                st.success(f"Berhasil! Tersisa **{len(df_dedup)}** baris (Menghapus {len(df) - len(df_dedup)} baris duplikat).")
-                st.dataframe(df_dedup.head())
-                
-                excel_data = to_excel(df_dedup)
-                st.download_button(
-                    label="Download Data Tanpa Duplikat (XLSX)",
-                    data=excel_data,
-                    file_name="data_deduplicated.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+            dup_columns = st.multiselect("Pilih acuan kolom duplikat:", df.columns.tolist())
+            if st.button("Hapus Duplikat"):
+                df_dedup = df.drop_duplicates(subset=dup_columns if dup_columns else None)
+                st.success(f"Tersisa {len(df_dedup)} baris.")
+                st.download_button("Download Data Tanpa Duplikat (XLSX)", data=to_excel(df_dedup), file_name="data_dedup.xlsx")
 
-# ==========================================
-# MENU 3: Merge Data (Maks 15 File)
-# ==========================================
 elif menu == "3. Merge Data (Maks 15)":
-    st.header("3. Gabungkan Beberapa File (Merge/Concat)")
-    uploaded_files = st.file_uploader("Upload file (CSV, XLSX, JSON) - Maksimal 15 file", type=['csv', 'xlsx', 'json'], accept_multiple_files=True, key='menu3')
-    
+    st.header("3. Gabungkan Beberapa File")
+    uploaded_files = st.file_uploader("Upload file (Maks 15)", type=['csv', 'xlsx', 'json'], accept_multiple_files=True, key='m3')
     if uploaded_files:
         if len(uploaded_files) > 15:
-            st.error("Anda mengunggah lebih dari 15 file. Harap kurangi jumlah file.")
-        else:
-            st.info(f"{len(uploaded_files)} file siap digabungkan.")
-            if st.button("Merge Sekarang"):
-                dfs = []
-                for file in uploaded_files:
-                    data = load_data(file)
-                    if data is not None:
-                        dfs.append(data)
-                
-                if dfs:
-                    merged_df = pd.concat(dfs, ignore_index=True)
-                    st.success(f"Berhasil digabung! Total baris: {len(merged_df)}")
-                    st.dataframe(merged_df.head())
-                    
-                    excel_data = to_excel(merged_df)
-                    st.download_button(
-                        label="Download Hasil Merge (XLSX)",
-                        data=excel_data,
-                        file_name="data_merged.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+            st.error("Maksimal 15 file.")
+        elif st.button("Merge Sekarang"):
+            dfs = [load_data(f) for f in uploaded_files if load_data(f) is not None]
+            if dfs:
+                merged_df = pd.concat(dfs, ignore_index=True)
+                st.success(f"Berhasil! Total baris: {len(merged_df)}")
+                st.download_button("Download Hasil Merge (XLSX)", data=to_excel(merged_df), file_name="data_merged.xlsx")
 
-# ==========================================
-# MENU 4: Ekstrak Telp & Alamat
-# ==========================================
 elif menu == "4. Ekstrak Telp & Alamat":
     st.header("4. Ekstrak Nomor HP dan Alamat")
-    uploaded_file = st.file_uploader("Upload file (CSV, XLSX, JSON)", type=['csv', 'xlsx', 'json'], key='menu4')
-    
+    uploaded_file = st.file_uploader("Upload file", type=['csv', 'xlsx', 'json'], key='m4')
     if uploaded_file:
         df = load_data(uploaded_file)
         if df is not None:
-            st.write("Preview Data:")
-            st.dataframe(df.head())
-            
-            all_columns = df.columns.tolist()
-            target_col = st.selectbox("Pilih kolom yang berisi teks campuran (biografi/profil):", all_columns)
-            
-            if st.button("Mulai Ekstrak"):
+            target_col = st.selectbox("Pilih kolom biografi/profil:", df.columns.tolist())
+            if st.button("Ekstrak"):
                 df['nomor_hp'] = df[target_col].apply(extract_phone_number)
                 df['alamat'] = df[target_col].apply(extract_address)
-                
-                st.success("Ekstraksi selesai! Kolom 'nomor_hp' dan 'alamat' telah ditambahkan.")
-                
-                st.dataframe(df[[target_col, 'nomor_hp', 'alamat']].head(10))
-                
-                excel_data = to_excel(df)
-                st.download_button(
-                    label="Download Hasil Ekstrak (XLSX)",
-                    data=excel_data,
-                    file_name="data_extracted.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                st.success("Selesai!")
+                st.dataframe(df[[target_col, 'nomor_hp', 'alamat']].head())
+                st.download_button("Download Hasil Ekstrak (XLSX)", data=to_excel(df), file_name="data_extracted.xlsx")
 
 # ==========================================
-# MENU 5: Visualisasi Peta (Long & Lat)
+# MENU 5: Visualisasi Peta (Terang & SHP)
 # ==========================================
-elif menu == "5. Visualisasi Peta (Long & Lat)":
-    st.header("5. Visualisasi Data di Peta")
-    st.write("Silakan upload data yang memiliki informasi koordinat *Latitude* (Lintang) dan *Longitude* (Bujur).")
+elif menu == "5. Visualisasi Peta (Terang & SHP)":
+    st.header("5. Visualisasi Data Peta & Export SHP")
     
-    uploaded_file = st.file_uploader("Upload file (CSV, XLSX, JSON)", type=['csv', 'xlsx', 'json'], key='menu5')
+    uploaded_file = st.file_uploader("Upload file data spasial", type=['csv', 'xlsx', 'json'], key='m5')
     
     if uploaded_file:
         df = load_data(uploaded_file)
         if df is not None:
-            st.write("Preview Data:")
-            st.dataframe(df.head())
-            
             all_columns = df.columns.tolist()
             
-            # Meminta user memilih kolom mana yang merupakan Latitude dan Longitude
             col1, col2 = st.columns(2)
             with col1:
                 lat_col = st.selectbox("Pilih kolom Latitude (Lintang):", all_columns)
             with col2:
                 lon_col = st.selectbox("Pilih kolom Longitude (Bujur):", all_columns)
             
-            if st.button("Tampilkan di Peta"):
-                try:
-                    # Streamlit st.map membutuhkan dataframe dengan nama kolom 'lat' dan 'lon'
-                    map_df = df[[lat_col, lon_col]].copy()
-                    map_df.columns = ['lat', 'lon']
+            if st.button("Tampilkan Peta"):
+                map_df = df.copy()
+                map_df['lat'] = pd.to_numeric(map_df[lat_col], errors='coerce')
+                map_df['lon'] = pd.to_numeric(map_df[lon_col], errors='coerce')
+                map_df = map_df.dropna(subset=['lat', 'lon'])
+                
+                if map_df.empty:
+                    st.warning("Data koordinat tidak valid.")
+                else:
+                    st.success(f"Memetakan {len(map_df)} titik lokasi.")
                     
-                    # Konversi nilai ke tipe numerik (mengabaikan/membuang data yang error atau kosong)
-                    map_df['lat'] = pd.to_numeric(map_df['lat'], errors='coerce')
-                    map_df['lon'] = pd.to_numeric(map_df['lon'], errors='coerce')
-                    map_df = map_df.dropna()
+                    # Konfigurasi Peta PyDeck (Tema Terang)
+                    view_state = pdk.ViewState(
+                        latitude=map_df['lat'].mean(),
+                        longitude=map_df['lon'].mean(),
+                        zoom=11,
+                        pitch=0
+                    )
                     
-                    if map_df.empty:
-                        st.warning("Tidak ditemukan data koordinat yang valid pada kolom yang dipilih.")
-                    else:
-                        st.success(f"Berhasil memetakan {len(map_df)} titik lokasi.")
-                        # Menampilkan peta
-                        st.map(map_df)
-                except Exception as e:
-                    st.error(f"Terjadi kesalahan saat membuat peta: {e}")
+                    layer = pdk.Layer(
+                        'ScatterplotLayer',
+                        data=map_df,
+                        get_position='[lon, lat]',
+                        get_color='[200, 30, 0, 160]', # Warna merah transparan
+                        get_radius=150,
+                        pickable=True
+                    )
+                    
+                    # Menggunakan map_style 'light' agar tidak gelap
+                    r = pdk.Deck(layers=[layer], initial_view_state=view_state, map_style='light', tooltip={"text": "{lat}, {lon}"})
+                    st.pydeck_chart(r)
+
+                    # Tombol Download Shapefile (.shp.zip)
+                    shp_zip = to_shp_zip(map_df, 'lat', 'lon')
+                    st.download_button(
+                        label="Download Shapefile (.zip)",
+                        data=shp_zip,
+                        file_name="peta_lokasi_shp.zip",
+                        mime="application/zip"
+                    )
