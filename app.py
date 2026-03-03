@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re
-import io
+import io 
 import geopandas as gpd
 from shapely.geometry import Point
 import tempfile
@@ -76,7 +76,7 @@ def extract_address(text):
 
 
 # Sidebar Navigasi
-st.sidebar.title("Menu Navigasi")
+st.sidebar.title("Menu Navigasi Processing KUDO")
 menu = st.sidebar.radio(
     "Pilih Task:",
     ("1. Filter & Download Kolom", 
