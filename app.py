@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import re
 import io
-import pydeck as pdk
 import geopandas as gpd
 from shapely.geometry import Point
 import tempfile
 import zipfile
 import os
+import folium
+from streamlit_folium import st_folium
 
 # Konfigurasi Halaman
 st.set_page_config(page_title="Data Processing App", layout="wide")
@@ -37,19 +38,15 @@ def to_excel(df):
 
 # Fungsi untuk mengonversi DataFrame ke format Shapefile (Zipped)
 def to_shp_zip(df, lat_col, lon_col):
-    # Membuat GeoDataFrame
     geometry = [Point(xy) for xy in zip(df[lon_col], df[lat_col])]
     gdf = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
     
-    # Membuat direktori sementara untuk menyimpan pecahan file SHP
     temp_dir = tempfile.mkdtemp()
     base_filename = "peta_lokasi"
     shp_path = os.path.join(temp_dir, f"{base_filename}.shp")
     
-    # Menyimpan ke format ESRI Shapefile
     gdf.to_file(shp_path, driver='ESRI Shapefile')
     
-    # Membungkus file-file SHP (.shp, .shx, .dbf, .prj) ke dalam satu ZIP
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for ext in ['.shp', '.shx', '.dbf', '.prj', '.cpg']:
@@ -86,11 +83,11 @@ menu = st.sidebar.radio(
      "2. Cek & Hapus Duplikat", 
      "3. Merge Data (Maks 15)", 
      "4. Ekstrak Telp & Alamat",
-     "5. Visualisasi Peta (Terang & SHP)")
+     "5. Visualisasi Peta (Google Maps & SHP)")
 )
 
 # ==========================================
-# MENU 1 - 4 (Sama seperti sebelumnya)
+# MENU 1 - 4 (Tetap Sama)
 # ==========================================
 if menu == "1. Filter & Download Kolom":
     st.header("1. Tampilkan dan Pilih Kolom Tertentu")
@@ -144,9 +141,9 @@ elif menu == "4. Ekstrak Telp & Alamat":
                 st.download_button("Download Hasil Ekstrak (XLSX)", data=to_excel(df), file_name="data_extracted.xlsx")
 
 # ==========================================
-# MENU 5: Visualisasi Peta (Terang & SHP)
+# MENU 5: Visualisasi Peta (Google Maps & SHP)
 # ==========================================
-elif menu == "5. Visualisasi Peta (Terang & SHP)":
+elif menu == "5. Visualisasi Peta (Google Maps & SHP)":
     st.header("5. Visualisasi Data Peta & Export SHP")
     
     uploaded_file = st.file_uploader("Upload file data spasial", type=['csv', 'xlsx', 'json'], key='m5')
@@ -156,13 +153,19 @@ elif menu == "5. Visualisasi Peta (Terang & SHP)":
         if df is not None:
             all_columns = df.columns.tolist()
             
+            # Baris 1: Pilihan Kordinat
             col1, col2 = st.columns(2)
             with col1:
-                lat_col = st.selectbox("Pilih kolom Latitude (Lintang):", all_columns)
+                lat_col = st.selectbox("Pilih kolom Latitude (Lintang):", all_columns, index=0)
             with col2:
-                lon_col = st.selectbox("Pilih kolom Longitude (Bujur):", all_columns)
+                lon_col = st.selectbox("Pilih kolom Longitude (Bujur):", all_columns, index=1 if len(all_columns)>1 else 0)
             
-            if st.button("Tampilkan Peta"):
+            # Baris 2: Pilihan Info yang Muncul Saat Diklik
+            st.write("---")
+            info_cols = st.multiselect("Pilih kolom yang ingin ditampilkan saat titik diklik (Popup Detail):", all_columns)
+            
+            if st.button("Render Peta"):
+                # Persiapan Data
                 map_df = df.copy()
                 map_df['lat'] = pd.to_numeric(map_df[lat_col], errors='coerce')
                 map_df['lon'] = pd.to_numeric(map_df[lon_col], errors='coerce')
@@ -173,31 +176,58 @@ elif menu == "5. Visualisasi Peta (Terang & SHP)":
                 else:
                     st.success(f"Memetakan {len(map_df)} titik lokasi.")
                     
-                    # Konfigurasi Peta PyDeck (Tema Terang)
-                    view_state = pdk.ViewState(
-                        latitude=map_df['lat'].mean(),
-                        longitude=map_df['lon'].mean(),
-                        zoom=11,
-                        pitch=0
-                    )
+                    # 1. Menentukan titik tengah peta
+                    center_lat = map_df['lat'].mean()
+                    center_lon = map_df['lon'].mean()
                     
-                    layer = pdk.Layer(
-                        'ScatterplotLayer',
-                        data=map_df,
-                        get_position='[lon, lat]',
-                        get_color='[200, 30, 0, 160]', # Warna merah transparan
-                        get_radius=150,
-                        pickable=True
-                    )
+                    # 2. Membuat Objek Peta (Tanpa Basemap Bawaan)
+                    m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles=None)
                     
-                    # Menggunakan map_style 'light' agar tidak gelap
-                    r = pdk.Deck(layers=[layer], initial_view_state=view_state, map_style='light', tooltip={"text": "{lat}, {lon}"})
-                    st.pydeck_chart(r)
+                    # 3. Menambahkan Layer Google Maps
+                    folium.TileLayer(
+                        tiles='http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}',
+                        attr='Google',
+                        name='Google Maps',
+                        overlay=False,
+                        control=True
+                    ).add_to(m)
+                    
+                    # 4. Memasukkan Titik-Titik ke Peta
+                    for idx, row in map_df.iterrows():
+                        # Merangkai HTML untuk isi Popup
+                        popup_html = f"<div style='min-width: 200px; font-family: Arial;'>"
+                        popup_html += f"<h4 style='margin-top: 0px;'>Detail Info</h4>"
+                        
+                        # Jika user memilih kolom untuk ditampilkan
+                        if info_cols:
+                            for col in info_cols:
+                                popup_html += f"<b>{col}:</b> {row[col]}<br>"
+                        else:
+                            # Default jika tidak ada kolom info yang dipilih
+                            popup_html += f"<b>Lat:</b> {row['lat']}<br><b>Lon:</b> {row['lon']}"
+                        
+                        popup_html += "</div>"
+                        
+                        # Membuat Marker Berwarna Merah (seperti di gambar Anda)
+                        folium.CircleMarker(
+                            location=[row['lat'], row['lon']],
+                            radius=6, # Ukuran titik
+                            color='#b80000', # Warna garis pinggir (merah gelap)
+                            fill=True,
+                            fill_color='#ff0000', # Warna isi titik (merah terang)
+                            fill_opacity=0.7,
+                            popup=folium.Popup(popup_html, max_width=300),
+                            tooltip="Klik untuk detail" # Teks saat kursor di atas titik (sebelum diklik)
+                        ).add_to(m)
+                    
+                    # Menampilkan Peta di Streamlit
+                    st_folium(m, width=1000, height=600, returned_objects=[])
 
                     # Tombol Download Shapefile (.shp.zip)
+                    st.write("---")
                     shp_zip = to_shp_zip(map_df, 'lat', 'lon')
                     st.download_button(
-                        label="Download Shapefile (.zip)",
+                        label="🗺️ Download Shapefile (.zip)",
                         data=shp_zip,
                         file_name="peta_lokasi_shp.zip",
                         mime="application/zip"
