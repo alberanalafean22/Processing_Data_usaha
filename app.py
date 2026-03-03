@@ -87,7 +87,7 @@ menu = st.sidebar.radio(
 )
 
 # ==========================================
-# MENU 1 - 4 (Tetap Sama)
+# MENU 1
 # ==========================================
 if menu == "1. Filter & Download Kolom":
     st.header("1. Tampilkan dan Pilih Kolom Tertentu")
@@ -101,18 +101,71 @@ if menu == "1. Filter & Download Kolom":
                 df_filtered = df[selected_columns]
                 st.download_button("Download Data (XLSX)", data=to_excel(df_filtered), file_name="data_filtered.xlsx")
 
+# ==========================================
+# MENU 2 (Diperbarui)
+# ==========================================
 elif menu == "2. Cek & Hapus Duplikat":
-    st.header("2. Hapus Baris Duplikat")
+    st.header("2. Cek & Hapus Baris Duplikat")
     uploaded_file = st.file_uploader("Upload file (CSV, XLSX, JSON)", type=['csv', 'xlsx', 'json'], key='m2')
+    
     if uploaded_file:
         df = load_data(uploaded_file)
         if df is not None:
-            dup_columns = st.multiselect("Pilih acuan kolom duplikat:", df.columns.tolist())
+            # Preview Data Awal
+            st.write("Preview Data Asli:")
+            st.dataframe(df.head())
+            
+            dup_columns = st.multiselect("Pilih acuan kolom duplikat (Kosongkan jika ingin cek seluruh kolom):", df.columns.tolist())
+            
             if st.button("Hapus Duplikat"):
-                df_dedup = df.drop_duplicates(subset=dup_columns if dup_columns else None)
-                st.success(f"Tersisa {len(df_dedup)} baris.")
-                st.download_button("Download Data Tanpa Duplikat (XLSX)", data=to_excel(df_dedup), file_name="data_dedup.xlsx")
+                subset = dup_columns if dup_columns else None
+                
+                # Mendapatkan data duplikat (baris yang dianggap kembar dan akan dibuang)
+                df_duplicates = df[df.duplicated(subset=subset, keep='first')]
+                
+                # Mendapatkan data bersih (tanpa duplikat)
+                df_clean = df.drop_duplicates(subset=subset, keep='first')
+                
+                st.success("Proses pengecekan duplikat selesai!")
+                
+                # Menampilkan Rekapitulasi Jumlah Data menggunakan st.metric
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Data Raw", f"{len(df)} baris")
+                col2.metric("Data Duplikat", f"{len(df_duplicates)} baris")
+                col3.metric("Data Bersih", f"{len(df_clean)} baris")
+                
+                st.write("---")
+                
+                # Menampilkan 3 Tabel secara berdampingan menggunakan Tabs
+                tab1, tab2, tab3 = st.tabs(["Tabel Data Raw", "Tabel Data Duplikat", "Tabel Data Bersih"])
+                
+                with tab1:
+                    st.write("**Data Asli sebelum diproses:**")
+                    st.dataframe(df)
+                    
+                with tab2:
+                    st.write("**Baris data yang terdeteksi sebagai duplikat:**")
+                    if len(df_duplicates) > 0:
+                        st.dataframe(df_duplicates)
+                    else:
+                        st.info("Tidak ada data duplikat yang ditemukan berdasarkan kolom yang dipilih.")
+                        
+                with tab3:
+                    st.write("**Data yang sudah bersih dari duplikat:**")
+                    st.dataframe(df_clean)
+                
+                st.write("---")
+                # Tombol Download untuk data bersih
+                st.download_button(
+                    label="Download Data Bersih (XLSX)", 
+                    data=to_excel(df_clean), 
+                    file_name="data_clean_dedup.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
+# ==========================================
+# MENU 3
+# ==========================================
 elif menu == "3. Merge Data (Maks 15)":
     st.header("3. Gabungkan Beberapa File")
     uploaded_files = st.file_uploader("Upload file (Maks 15)", type=['csv', 'xlsx', 'json'], accept_multiple_files=True, key='m3')
@@ -126,6 +179,9 @@ elif menu == "3. Merge Data (Maks 15)":
                 st.success(f"Berhasil! Total baris: {len(merged_df)}")
                 st.download_button("Download Hasil Merge (XLSX)", data=to_excel(merged_df), file_name="data_merged.xlsx")
 
+# ==========================================
+# MENU 4
+# ==========================================
 elif menu == "4. Ekstrak Telp & Alamat":
     st.header("4. Ekstrak Nomor HP dan Alamat")
     uploaded_file = st.file_uploader("Upload file", type=['csv', 'xlsx', 'json'], key='m4')
@@ -141,7 +197,7 @@ elif menu == "4. Ekstrak Telp & Alamat":
                 st.download_button("Download Hasil Ekstrak (XLSX)", data=to_excel(df), file_name="data_extracted.xlsx")
 
 # ==========================================
-# MENU 5: Visualisasi Peta (Google Maps & SHP)
+# MENU 5
 # ==========================================
 elif menu == "5. Visualisasi Peta (Google Maps & SHP)":
     st.header("5. Visualisasi Data Peta & Export SHP")
@@ -208,16 +264,16 @@ elif menu == "5. Visualisasi Peta (Google Maps & SHP)":
                         
                         popup_html += "</div>"
                         
-                        # Membuat Marker Berwarna Merah (seperti di gambar Anda)
+                        # Membuat Marker Berwarna Merah
                         folium.CircleMarker(
                             location=[row['lat'], row['lon']],
-                            radius=6, # Ukuran titik
-                            color='#b80000', # Warna garis pinggir (merah gelap)
+                            radius=6, 
+                            color='#b80000', 
                             fill=True,
-                            fill_color='#ff0000', # Warna isi titik (merah terang)
+                            fill_color='#ff0000', 
                             fill_opacity=0.7,
                             popup=folium.Popup(popup_html, max_width=300),
-                            tooltip="Klik untuk detail" # Teks saat kursor di atas titik (sebelum diklik)
+                            tooltip="Klik untuk detail" 
                         ).add_to(m)
                     
                     # Menampilkan Peta di Streamlit
