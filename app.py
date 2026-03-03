@@ -61,7 +61,7 @@ menu = st.sidebar.radio(
 # ==========================================
 # MENU 1: Membaca file dan memilih kolom
 # ==========================================
-if menu == "Filter & Download Kolom":
+if menu == "1. Filter & Download Kolom":
     st.header("1. Tampilkan dan Pilih Kolom Tertentu")
     uploaded_file = st.file_uploader("Upload file (CSV, XLSX, JSON)", type=['csv', 'xlsx', 'json'], key='menu1')
     
