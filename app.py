@@ -55,7 +55,8 @@ menu = st.sidebar.radio(
     ("1. Filter & Download Kolom", 
      "2. Cek & Hapus Duplikat", 
      "3. Merge Data (Maks 15)", 
-     "4. Ekstrak Telp & Alamat")
+     "4. Ekstrak Telp & Alamat",
+     "5. Visualisasi Peta (Long & Lat)") # <-- Menu Baru
 )
 
 # ==========================================
@@ -122,7 +123,6 @@ elif menu == "2. Cek & Hapus Duplikat":
 # ==========================================
 elif menu == "3. Merge Data (Maks 15)":
     st.header("3. Gabungkan Beberapa File (Merge/Concat)")
-    
     uploaded_files = st.file_uploader("Upload file (CSV, XLSX, JSON) - Maksimal 15 file", type=['csv', 'xlsx', 'json'], accept_multiple_files=True, key='menu3')
     
     if uploaded_files:
@@ -138,7 +138,6 @@ elif menu == "3. Merge Data (Maks 15)":
                         dfs.append(data)
                 
                 if dfs:
-                    # Menggabungkan data secara vertikal (baris bertambah)
                     merged_df = pd.concat(dfs, ignore_index=True)
                     st.success(f"Berhasil digabung! Total baris: {len(merged_df)}")
                     st.dataframe(merged_df.head())
@@ -168,14 +167,12 @@ elif menu == "4. Ekstrak Telp & Alamat":
             target_col = st.selectbox("Pilih kolom yang berisi teks campuran (biografi/profil):", all_columns)
             
             if st.button("Mulai Ekstrak"):
-                # Menerapkan fungsi regex ke kolom yang dipilih pengguna
                 df['nomor_hp'] = df[target_col].apply(extract_phone_number)
                 df['alamat'] = df[target_col].apply(extract_address)
                 
                 st.success("Ekstraksi selesai! Kolom 'nomor_hp' dan 'alamat' telah ditambahkan.")
                 
-                # Tampilkan kolom baru beserta kolom aslinya agar mudah dicek
-                st.dataframe(df[[target_col, 'nomor_hp', 'alamat']].head(30))
+                st.dataframe(df[[target_col, 'nomor_hp', 'alamat']].head(10))
                 
                 excel_data = to_excel(df)
                 st.download_button(
@@ -184,3 +181,47 @@ elif menu == "4. Ekstrak Telp & Alamat":
                     file_name="data_extracted.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+
+# ==========================================
+# MENU 5: Visualisasi Peta (Long & Lat)
+# ==========================================
+elif menu == "5. Visualisasi Peta (Long & Lat)":
+    st.header("5. Visualisasi Data di Peta")
+    st.write("Silakan upload data yang memiliki informasi koordinat *Latitude* (Lintang) dan *Longitude* (Bujur).")
+    
+    uploaded_file = st.file_uploader("Upload file (CSV, XLSX, JSON)", type=['csv', 'xlsx', 'json'], key='menu5')
+    
+    if uploaded_file:
+        df = load_data(uploaded_file)
+        if df is not None:
+            st.write("Preview Data:")
+            st.dataframe(df.head())
+            
+            all_columns = df.columns.tolist()
+            
+            # Meminta user memilih kolom mana yang merupakan Latitude dan Longitude
+            col1, col2 = st.columns(2)
+            with col1:
+                lat_col = st.selectbox("Pilih kolom Latitude (Lintang):", all_columns)
+            with col2:
+                lon_col = st.selectbox("Pilih kolom Longitude (Bujur):", all_columns)
+            
+            if st.button("Tampilkan di Peta"):
+                try:
+                    # Streamlit st.map membutuhkan dataframe dengan nama kolom 'lat' dan 'lon'
+                    map_df = df[[lat_col, lon_col]].copy()
+                    map_df.columns = ['lat', 'lon']
+                    
+                    # Konversi nilai ke tipe numerik (mengabaikan/membuang data yang error atau kosong)
+                    map_df['lat'] = pd.to_numeric(map_df['lat'], errors='coerce')
+                    map_df['lon'] = pd.to_numeric(map_df['lon'], errors='coerce')
+                    map_df = map_df.dropna()
+                    
+                    if map_df.empty:
+                        st.warning("Tidak ditemukan data koordinat yang valid pada kolom yang dipilih.")
+                    else:
+                        st.success(f"Berhasil memetakan {len(map_df)} titik lokasi.")
+                        # Menampilkan peta
+                        st.map(map_df)
+                except Exception as e:
+                    st.error(f"Terjadi kesalahan saat membuat peta: {e}")
